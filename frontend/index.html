@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Llama SSE API</title>
+    <style>
+        body { font-family: Arial; padding: 20px; max-width: 600px; margin: auto; }
+        #output { background: #f4f4f9; padding: 15px; border-radius: 5px; min-height: 100px; white-space: pre-wrap; margin-bottom: 10px; }
+        input { width: 75%; padding: 8px; }
+        button { padding: 8px 15px; }
+    </style>
+</head>
+<body>
+    <h2>Llama SSE API Test Client</h2>
+    <div id="output"></div>
+    <input type="text" id="msgInput" placeholder="Ask something..." onkeydown="if(event.key==='Enter') sendMsg()">
+    <button onclick="sendMsg()">Send</button>
+
+    <script>
+        // Same origin when served by FastAPI; falls back to the API address if opened as a file
+        const API_BASE = location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
+
+        async function sendMsg() {
+            const input = document.getElementById('msgInput');
+            const output = document.getElementById('output');
+            const text = input.value.trim();
+            if (!text) return;
+
+            output.append('\n\n');
+            const who = document.createElement('b');
+            who.textContent = 'User:';
+            output.append(who, ' ' + text + '\n');
+            const ai = document.createElement('b');
+            ai.textContent = 'AI:';
+            output.append(ai, ' ');
+            input.value = '';
+
+            try {
+                const response = await fetch(API_BASE + '/api/chat-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.replace('data: ', '').trim();
+                            if (dataStr === '[DONE]') return;
+                            const json = JSON.parse(dataStr);
+                            if (json.token) {
+                                output.append(json.token);
+                            }
+                            if (json.error) {
+                                output.append(' [Error: ' + json.error + ']');
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                output.append(' [Error connecting to API]');
+            }
+        }
+    </script>
+</body>
+</html>
